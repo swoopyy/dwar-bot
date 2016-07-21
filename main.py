@@ -43,6 +43,11 @@ class GetUpdatesHandler(webapp2.RequestHandler):
         self.response.write(json.dumps(json.load(urllib2.urlopen(BASE_URL + 'getUpdates'))))
 
 
+class OnlineCheckHandler(webapp2.RequestHandler):
+    def get(self):
+        pass
+
+
 def reply(chat_id, message_id, msg=None, parse_mode=None, *keyboard_buttons):
     if msg:
         dct = {
@@ -73,21 +78,44 @@ def reply(chat_id, message_id, msg=None, parse_mode=None, *keyboard_buttons):
     logging.info(resp)
 
 
-def collect_enemy_info(chat_id, message_id, *enemies):
-    msg = u"Вот тваи враги:\n"
+def collect_enemy_info(chat_id, message_id, is_nudist, *enemies):
+    msg = u"Вот сматри:\n"
     number = 1
     for enemy in enemies:
         msg += str(number) + ('. <a href="%s">%s</a> ' % (enemy['link'], enemy['name']))
         url = enemy['link']
         resp = urllib2.urlopen(url).read()
-        index = resp.find('online=')
-        if resp[index + 7] == '1':
-            msg += "Online\n"
-        else:
-            msg += "Offline\n"
+        msg += " Online " if _get_online_from_resp(resp) else " Offline "
+        msg += _get_location_from_resp(resp) + "\n"
         number += 1
-    reply(chat_id, message_id, msg, 'HTML', *[u'Мои враги', u'Добавить врага', u'Удалить врага', u'Назад'])
+    if is_nudist:
+        reply(chat_id, message_id, msg, 'HTML', *[u'Отписаться', u'Вывести нудистов', u'Назад'])
+    else:
+        reply(chat_id, message_id, msg, 'HTML', *[u'Мои враги', u'Добавить врага', u'Удалить врага', u'Назад'])
 
+
+
+def _get_location_from_resp(resp):
+    begin = resp.find('Location=') + 9
+    end = resp.find('&', begin)
+    return urllib.unquote(resp[begin:end].replace('+', ' ')).decode('utf8')
+
+
+def _get_online_from_resp(resp):
+    index = resp.find('online=')
+    return resp[index + 7] == '1'
+
+
+def _set_enemy_link_and_online(resp, enemy):
+    index = resp.find('&noredir=')
+    if index == -1 and resp.find('avatar_picture') != -1:
+        return False
+    if index != -1:
+        end = resp.find("';", index)
+        enemy.link = PLAYER_BASE_URL + urllib.quote_plus(enemy.name.encode('utf-8')) + "&noredir=" + resp[index+9:end]
+    else:
+        enemy.link = PLAYER_BASE_URL + urllib.quote_plus(enemy.name.encode('utf-8'))
+    return True
 
 def add_enemy(user, enemy_nick):
     url = PLAYER_BASE_URL + urllib.quote_plus(enemy_nick.encode('utf-8'))
@@ -96,10 +124,12 @@ def add_enemy(user, enemy_nick):
         reply(user.key.id(), None, u'Братка ты ввел ниверныи ник', None, *[u'Мои враги', u'Добавить врага', u'Удалить врага', u'Назад'])
     else:
         enemy = Enemy.get_or_insert(enemy_nick)
-        index = resp.find('online=')
-        enemy.is_online = resp[index + 7] == 1
-        enemy.link = url
         enemy.name = enemy_nick
+
+        if not _set_enemy_link_and_online(resp, enemy):
+            reply(user.key.id(), None, u'Братка у тваево врага закрытая инфа', None, *[u'Мои враги', u'Добавить врага', u'Удалить врага', u'Назад'])
+            return
+
         user.enemies.append(
             enemy.put()
         )
@@ -127,22 +157,18 @@ class WebhookHandler(webapp2.RequestHandler):
         logging.info('request body:')
         logging.info(body)
 
-        update_id = body['update_id']
         message = body['message']
         message_id = message.get('message_id')
-        date = message.get('date')
         text = message.get('text')
-        fr = message.get('from')
         chat = message['chat']
         chat_id = chat['id']
 
         if not text:
-            logging.info('no text')
             return
 
         if text.startswith('/'):
             if text == '/start':
-                reply(chat_id, message_id, u'Здарова братан тут бот будит тибе маниторить нудистав и врагов.\n Все четка',
+                reply(chat_id, message_id, u'Здарова братан тут бот будит тибе маниторить нудистав и врагов. Все четка',
                       None,
                       *[u'Нудисты', u'Враги'])
                 User.get_or_insert(str(chat_id)).put()
@@ -151,10 +177,10 @@ class WebhookHandler(webapp2.RequestHandler):
         user = User.get_by_id(str(chat_id))
         if text == u'Нудисты':
             if user.wants_receive_nudists:
-                reply(chat_id, message_id, u'Отпишись от получения инфы о нудистах если хочещ брат.', None, *[u'Отписаться', u'Назад'])
+                reply(chat_id, message_id, u'Отпишись от получения инфы о нудистах если хочещ брат.', None, *[u'Отписаться', u'Вывести нудистов', u'Назад'])
             else:
                 reply(chat_id, message_id, u'Подпишись на палучения инфы о нудистах брат. Буду слать тибе'
-                      u'инфу кагда нудист зашол где и кагда начел бой.', None, *[u'Подписаться', u'Назад'])
+                      u'инфу кагда нудист зашол где и кагда начел бой.', None, *[u'Подписаться', u'Вывести нудистов', u'Назад'])
 
         elif text == u'Отписаться':
             user.wants_receive_nudists = False
@@ -176,7 +202,7 @@ class WebhookHandler(webapp2.RequestHandler):
         elif text == u'Мои враги':
             enemies = None #memcache.get('enemies' + user.key.id())
             if enemies:
-                deferred.defer(collect_enemy_info, chat_id, message_id, *enemies)
+                deferred.defer(collect_enemy_info, chat_id, message_id, False, *enemies)
             else:
                 enemies = []
                 for enemy in user.enemies:
@@ -184,11 +210,10 @@ class WebhookHandler(webapp2.RequestHandler):
                         {
                             'name': enemy.get().name,
                             'link': enemy.get().link,
-                            'chat_id': enemy.id()
                         }
                     )
                 memcache.set('enemies' + user.key.id(), enemies)
-                deferred.defer(collect_enemy_info, chat_id, message_id, *enemies)
+                deferred.defer(collect_enemy_info, chat_id, message_id, False, *enemies)
 
         elif text == u'Добавить врага':
             if len(user.enemies) == MAX_NUMBER_OF_ENEMIES:
@@ -211,6 +236,24 @@ class WebhookHandler(webapp2.RequestHandler):
                       None,
                       *[u'Нудисты', u'Враги'])
 
+        elif text == u'Вывести нудистов':
+            nudists = memcache.get('nudists')
+            if nudists:
+                deferred.defer(collect_enemy_info, chat_id, message_id, True, *nudists)
+            else:
+                query = Enemy.query(Enemy.is_nudist == True)
+                nudists = []
+                for nudist in query.fetch():
+                    logging.debug(str(nudist))
+                    nudists.append(
+                        {
+                            'name': nudist.name,
+                            'link': nudist.link,
+                        }
+                    )
+                memcache.set('nudist' + user.key.id(), nudists)
+                deferred.defer(collect_enemy_info, chat_id, message_id, True, *nudists)
+
         elif user.state == ADD_ENEMY_STATE:
             logging.info("User %s just added enemy %s" % (user.key.id(), text))
             memcache.set('enemies' + user.key.id(), None)
@@ -222,13 +265,10 @@ class WebhookHandler(webapp2.RequestHandler):
             deferred.defer(remove_enemy, user, text)
 
 
-
-
-
-
 app = webapp2.WSGIApplication([
     ('/me', MeHandler),
     ('/updates', GetUpdatesHandler),
     ('/set_webhook', SetWebhookHandler),
     ('/webhook', WebhookHandler),
+    ('/cron/online', OnlineCheckHandler),
 ], debug=True)
