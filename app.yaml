@@ -9,8 +9,15 @@ handlers:
   static_files: favicon.ico
   upload: favicon\.ico
 
+- url: /_ah/queue/deferred
+  script: google.appengine.ext.deferred.deferred.application
+  login: admin
+
 - url: .*
   script: main.app
+
+builtins:
+- deferred: on
 
 libraries:
 - name: webapp2
