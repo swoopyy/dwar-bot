@@ -45,7 +45,42 @@ class GetUpdatesHandler(webapp2.RequestHandler):
 
 class OnlineCheckHandler(webapp2.RequestHandler):
     def get(self):
-        pass
+        deferred.defer(online_checker)
+
+
+def _get_location_from_resp(resp):
+    begin = resp.find('Location=') + 9
+    end = resp.find('&', begin)
+    return urllib.unquote(resp[begin:end].replace('+', ' ')).decode('utf8')
+
+
+def _get_online_from_resp(resp):
+    index = resp.find('online=')
+    return resp[index + 7] == '1'
+
+
+def online_checker():
+    users = User.query().fetch()
+    for user in users:
+        deferred.defer(enemies_checker, user)
+
+
+def enemies_checker(user):
+    for key in user.enemies:
+        enemy = key.get()
+        resp = urllib2.urlopen(enemy.link).read()
+        online = _get_online_from_resp(resp)
+        location = _get_location_from_resp(resp)
+        logging.debug(str(enemy))
+        logging.debug(online)
+        if enemy.is_online != online:
+            if online:
+                msg = u'Твой враг <a href="%s">%s</a> зашол в игру' % (enemy.link, enemy.name)
+            else:
+                msg = u'Твой враг <a href="%s">%s</a> вышел из игры' % (enemy.link, enemy.name)
+            reply(user.key.id(), None, msg, 'HTML', *[u'Мои враги', u'Добавить врага', u'Удалить врага', u'Назад'])
+            enemy.is_online = online
+            enemy.put()
 
 
 def reply(chat_id, message_id, msg=None, parse_mode=None, *keyboard_buttons):
@@ -93,17 +128,6 @@ def collect_enemy_info(chat_id, message_id, is_nudist, *enemies):
     else:
         reply(chat_id, message_id, msg, 'HTML', *[u'Мои враги', u'Добавить врага', u'Удалить врага', u'Назад'])
 
-
-
-def _get_location_from_resp(resp):
-    begin = resp.find('Location=') + 9
-    end = resp.find('&', begin)
-    return urllib.unquote(resp[begin:end].replace('+', ' ')).decode('utf8')
-
-
-def _get_online_from_resp(resp):
-    index = resp.find('online=')
-    return resp[index + 7] == '1'
 
 
 def _set_enemy_link_and_online(resp, enemy):
