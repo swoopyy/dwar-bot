@@ -158,13 +158,15 @@ class WebhookHandler(webapp2.RequestHandler):
 
         elif text == u'Отписаться':
             user.wants_receive_nudists = False
-            user.put_async()
+            future = user.put_async()
             reply(chat_id, message_id, u'Ок', None, *[u'Нудисты', u'Враги'])
+            future.get_result()
 
         elif text == u'Подписаться':
             user.wants_receive_nudists = True
-            user.put_async()
+            future = user.put_async()
             reply(chat_id, message_id, u'Ок', None, *[u'Нудисты', u'Враги'])
+            future.get_result()
 
         elif text == u'Враги':
             txt = u'Всех твоих врагов я буду чекать  и присылать тебе ' \
@@ -194,13 +196,15 @@ class WebhookHandler(webapp2.RequestHandler):
                       *[u'Мои враги', u'Добавить врага', u'Удалить врага', u'Назад'])
                 return
             user.state = ADD_ENEMY_STATE
-            user.put()
+            future = user.put_async()
             reply(chat_id, message_id, u'Пришли мне ник своево врага братка', None)
+            future.get_result()
 
         elif text == u'Удалить врага':
             user.state = REMOVE_ENEMY_STATE
-            user.put()
+            future = user.put_async()
             reply(chat_id, message_id, u'Пришли ник врага каво удалить', None)
+            future.get_result()
 
         elif text == u'Назад':
              reply(chat_id, message_id, u'Гари потер царь',
