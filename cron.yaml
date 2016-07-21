@@ -1,5 +1,15 @@
 cron:
-- description: checking online
+- description: checking enemies online
   url: /cron/online
   target: default
+  schedule: every 2 mins
+
+- description: checking nudists online
+  url: /cron/nudists_online
+  target: default
   schedule: every 5 mins
+
+- description: checking nudists fight status
+  url: /cron/nudists_fight
+  target: default
+  schedule: every 2 mins
