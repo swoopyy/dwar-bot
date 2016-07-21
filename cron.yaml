@@ -1,0 +1,5 @@
+cron:
+- description: checking online
+  url: /cron/online
+  target: default
+  schedule: every 5 mins
