@@ -48,6 +48,16 @@ class OnlineCheckHandler(webapp2.RequestHandler):
         deferred.defer(online_checker)
 
 
+class NudistsOnlineCheckHandler(webapp2.RequestHandler):
+    def get(self):
+        deferred.defer(nudists_online_checker)
+
+
+class NudistsFightsCheckHandler(webapp2.RequestHandler):
+    def get(self):
+        deferred.defer(nudists_fight_checker)
+
+
 def _get_location_from_resp(resp):
     begin = resp.find('Location=') + 9
     end = resp.find('&', begin)
@@ -57,6 +67,85 @@ def _get_location_from_resp(resp):
 def _get_online_from_resp(resp):
     index = resp.find('online=')
     return resp[index + 7] == '1'
+
+
+def _get_fight_id_from_resp(resp):
+    fight_marker = 'fightId='
+    begin = resp.find(fight_marker) + len(fight_marker)
+    end = resp.find('&', begin)
+    return resp[begin:end]
+
+
+def _get_fight_start_time(resp):
+    time_marker = u'Начало боя:</span> <b class="redd">'.encode('utf8')
+    begin = resp.find(time_marker) + len(time_marker) + 11
+    end = begin + 5
+    return resp[begin:end]
+
+
+def _get_fight_name(resp):
+    name_marker = u'Название:</span> <b class="redd">'.encode('utf8')
+    begin = resp.find(name_marker) + len(name_marker)
+    end = resp.find('</b>', begin)
+    return resp[begin:end]
+
+
+def nudists_online_checker():
+    memcache.set('nudists_online', None)
+    nudists = memcache.get('nudists_ent')
+    if not nudists:
+        nudists = Enemy.query(Enemy.is_nudist == True).fetch()
+        memcache.set('nudists_ent', nudists)
+
+    nudist_subscribers = memcache.get('nudists_subscribers')
+    if not nudist_subscribers:
+        nudist_subscribers = User.query(User.wants_receive_nudists == True)
+        memcache.set('nudists_subscribers', nudist_subscribers)
+
+    msg = ""
+    for nudist in nudists:
+        resp = urllib2.urlopen(nudist.link).read()
+        online = _get_online_from_resp(resp)
+        if nudist.is_online != online:
+            if online:
+                msg += u'Нудист <a href="%s">%s</a> зашол в игру\n' % (nudist.link, nudist.name)
+            else:
+                msg += u'Нудист <a href="%s">%s</a> вышел из игры\n' % (nudist.link, nudist.name)
+            nudist.is_online = online
+            nudist.put()
+
+    memcache.set('nudists_ent', nudists)
+
+    for subscr in nudist_subscribers:
+            reply(subscr.key.id(), None, msg, 'HTML', *[u'Нудисты', u'Враги'])
+
+
+def nudists_fight_checker():
+    online_nudists = memcache.get('nudists_online')
+    if not online_nudists:
+        online_nudists = Enemy.query(Enemy.is_nudist == True).filter(Enemy.is_online == True).fetch()
+        memcache.set('nudists_online', online_nudists)
+
+    nudists_subscr = memcache.get('nudists_subscribers')
+    if not nudists_subscr:
+        nudists_subscr = User.query(User.wants_receive_nudists == True)
+
+    msg = ''
+    for nudist in online_nudists:
+        resp = urllib2.urlopen(nudist.link).read()
+        fight_id = _get_fight_id_from_resp(resp)
+        if fight_id != '0':
+            fight_url = FIGHT_BASE_URL + fight_id
+            resp = urllib2.urlopen(fight_url).read()
+            fight_name = _get_fight_name(resp)
+            fight_time = _get_fight_start_time(resp)
+            msg += u'Нудист <a href="%s">%s</a> в %s начил <a href="%s">бой</a> %s\n' % \
+                   (nudist.link, nudist.name, fight_time,
+                    fight_url, fight_name.decode('utf8'))
+
+    if msg:
+        for subscr in nudists_subscr:
+            reply(subscr.key.id(), None, msg, 'HTML', *[u'Нудисты', u'Враги'])
 
 
 def online_checker():
@@ -70,9 +159,6 @@ def enemies_checker(user):
         enemy = key.get()
         resp = urllib2.urlopen(enemy.link).read()
         online = _get_online_from_resp(resp)
-        location = _get_location_from_resp(resp)
-        logging.debug(str(enemy))
-        logging.debug(online)
         if enemy.is_online != online:
             if online:
                 msg = u'Твой враг <a href="%s">%s</a> зашол в игру' % (enemy.link, enemy.name)
@@ -89,7 +175,6 @@ def reply(chat_id, message_id, msg=None, parse_mode=None, *keyboard_buttons):
             'chat_id': str(chat_id),
             'text': msg,
             'disable_web_page_preview': 'true',
-            #'reply_to_message_id': str(message_id),
         }
         if parse_mode:
             dct['parse_mode'] = parse_mode
@@ -210,12 +295,15 @@ class WebhookHandler(webapp2.RequestHandler):
             user.wants_receive_nudists = False
             future = user.put_async()
             reply(chat_id, message_id, u'Ок', None, *[u'Нудисты', u'Враги'])
+            memcache.set('nudists_subscribers', None)
             future.get_result()
+
 
         elif text == u'Подписаться':
             user.wants_receive_nudists = True
             future = user.put_async()
             reply(chat_id, message_id, u'Ок', None, *[u'Нудисты', u'Враги'])
+            memcache.set('nudists_subscribers', None)
             future.get_result()
 
         elif text == u'Враги':
@@ -295,4 +383,6 @@ app = webapp2.WSGIApplication([
     ('/set_webhook', SetWebhookHandler),
     ('/webhook', WebhookHandler),
     ('/cron/online', OnlineCheckHandler),
+    ('/cron/nudists_online', NudistsOnlineCheckHandler),
+    ('/cron/nudists_fight', NudistsFightsCheckHandler),
 ], debug=True)

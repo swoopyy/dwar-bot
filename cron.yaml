@@ -2,7 +2,7 @@ cron:
 - description: checking enemies online
   url: /cron/online
   target: default
-  schedule: every 2 mins
+  schedule: every 5 mins
 
 - description: checking nudists online
   url: /cron/nudists_online
