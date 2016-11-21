@@ -5,6 +5,7 @@ import urllib
 import urllib2
 import json
 import logging
+
 from google.appengine.api import users, memcache
 from google.appengine.ext.deferred import deferred
 from models import *
@@ -16,7 +17,6 @@ PLAYER_BASE_URL = 'https://w2.dwar.ru/user_info.php?nick='
 FIGHT_BASE_URL = 'http://w2.dwar.ru/fight_info.php?fight_id='
 
 MAX_NUMBER_OF_ENEMIES = 3
-
 NONE_STATE = 0
 ADD_ENEMY_STATE = 1
 REMOVE_ENEMY_STATE = 2
@@ -26,7 +26,7 @@ def check_admin():
     return user and users.is_current_user_admin()
 
 
-class MeHandler(webapp2.RequestHandler):
+class MainHandler(webapp2.RequestHandler):
     def get(self):
         self.response.write(json.dumps(json.load(urllib2.urlopen(BASE_URL + 'getMe'))))
 
@@ -41,7 +41,6 @@ class SetWebhookHandler(webapp2.RequestHandler):
 class GetUpdatesHandler(webapp2.RequestHandler):
     def get(self):
         self.response.write(json.dumps(json.load(urllib2.urlopen(BASE_URL + 'getUpdates'))))
-
 
 class OnlineCheckHandler(webapp2.RequestHandler):
     def get(self):
@@ -378,11 +377,11 @@ class WebhookHandler(webapp2.RequestHandler):
 
 
 app = webapp2.WSGIApplication([
-    ('/me', MeHandler),
     ('/updates', GetUpdatesHandler),
     ('/set_webhook', SetWebhookHandler),
     ('/webhook', WebhookHandler),
     ('/cron/online', OnlineCheckHandler),
     ('/cron/nudists_online', NudistsOnlineCheckHandler),
     ('/cron/nudists_fight', NudistsFightsCheckHandler),
+
 ], debug=True)
